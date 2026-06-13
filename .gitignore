@@ -34,6 +34,8 @@ wheelhouse/
 *.log
 *.pid
 *.sock
+.geminiwebapp-cli/
+profiles/
 
 # Browser automation artifacts
 playwright-report/

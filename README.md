@@ -16,6 +16,14 @@ uv sync
 uv run python -m camoufox fetch
 ```
 
+## Docker Install
+
+```bash
+python -m pip install "git+https://github.com/darwincr/geminiwebapp-cli.git@main"
+python -m camoufox fetch
+geminiwebapp-cli --help
+```
+
 ## Quickstart
 
 ```bash
