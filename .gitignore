@@ -1,0 +1,61 @@
+# macOS
+.DS_Store
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging/build artifacts
+*.egg-info/
+dist/
+build/
+wheelhouse/
+
+# Local environment/config
+.env
+.env.*
+!.env.example
+
+# Logs and runtime state
+*.log
+*.pid
+*.sock
+
+# Browser automation artifacts
+playwright-report/
+test-results/
+downloads/
+screenshots/
+traces/
+NUC13Extreme.jpg
+
+# Generated Gemini media from smoke/manual runs
+gemini-image-*.png
+gemini-image-*.jpg
+gemini-image-*.jpeg
+gemini-image-*.webp
+gemini-video-*.mp4
+gemini-video-*.webm
+gemini-video-*.mov
+gemini-music-*.mp3
+gemini-music-*.wav
+gemini-music-*.m4a
+video-tests/
+music-tests/
+
+# Project-local uv lock is intentionally ignored in this repo.
+uv.lock
