@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from geminiwebapp_cli.actions.auth import _email_from_text
 from geminiwebapp_cli.actions.chats import _response_payload, _select_video_aspect_ratio_if_needed, _tool_label, _video_aspect_ratio_label, chat_id_from_url, chat_url
 from geminiwebapp_cli.cli import _argv_with_prompt_text, _image_output_dir, _parse_args, build_parser
 from geminiwebapp_cli.conf import DEFAULT_DEEP_RESEARCH_TIMEOUT_S, DEFAULT_RESPONSE_TIMEOUT_S, GEMINI_APP_URL, GEMINI_BASE_URL, load_dotenv_file
@@ -26,6 +27,17 @@ class TestChatUrl:
 
     def test_chat_id_from_url(self):
         assert chat_id_from_url("https://gemini.google.com/app/abc123?x=1") == "abc123"
+
+
+class TestAuthParsing:
+    def test_email_from_google_account_label(self):
+        assert _email_from_text("Google Account: Darwin C (darwin@example.com)") == "darwin@example.com"
+
+    def test_email_from_popover_text(self):
+        assert _email_from_text("Darwin C\ndarwin.cr+gemini@example.co.uk\nManage your Google Account") == "darwin.cr+gemini@example.co.uk"
+
+    def test_email_from_text_without_email(self):
+        assert _email_from_text("Google Account") is None
 
 
 class TestCliParsing:

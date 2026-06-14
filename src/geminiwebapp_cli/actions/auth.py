@@ -12,10 +12,13 @@ from geminiwebapp_cli.exceptions import AuthenticationError, GeminiUnavailableEr
 
 logger = logging.getLogger(__name__)
 
+EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+
 SIGN_IN_LOCATORS = [
     lambda p: p.get_by_role("link", name=re.compile("sign in", re.I)),
     lambda p: p.get_by_role("button", name=re.compile("sign in", re.I)),
-    lambda p: p.locator('a[href*="accounts.google.com"]'),
+    lambda p: p.locator('a[href*="accounts.google.com/ServiceLogin"]'),
+    lambda p: p.locator('a[href*="accounts.google.com/signin"]'),
     lambda p: p.locator('button:has-text("Sign in")'),
 ]
 AUTHENTICATED_LOCATORS = [
@@ -29,10 +32,17 @@ AUTHENTICATED_LOCATORS = [
 ]
 PROMPT_READY_LOCATORS = AUTHENTICATED_LOCATORS[:5]
 ACCOUNT_LOCATORS = [
+    lambda p: p.locator('a[href*="accounts.google.com/SignOutOptions"]'),
     lambda p: p.locator('a[href*="myaccount.google.com"]'),
     lambda p: p.locator('button[aria-label*="Google Account" i]'),
     lambda p: p.locator('[aria-label*="Google Account" i]'),
     lambda p: p.locator('img[alt*="Profile" i]'),
+]
+ACCOUNT_POPOVER_LOCATORS = [
+    lambda p: p.locator('[role="dialog"]'),
+    lambda p: p.locator('[role="menu"]'),
+    lambda p: p.locator('iframe[src*="accounts.google.com"]'),
+    lambda p: p.locator('iframe[name*="account" i]'),
 ]
 UNAVAILABLE_LOCATORS = [
     lambda p: p.locator('text=/Gemini isn.t currently supported/i'),
@@ -58,17 +68,62 @@ def _blocking_state(session, *, timeout_ms: int = 800) -> str | None:
     return None
 
 
+def _email_from_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = EMAIL_RE.search(text)
+    return match.group(0).strip(",.;()[]{}<>") if match else None
+
+
 def _account_hint(session) -> tuple[str | None, str | None]:
     page = session.page
-    locator = first_visible(page, ACCOUNT_LOCATORS, timeout_ms=1000)
-    label = safe_attr(locator, "aria-label") or safe_attr(locator, "alt") or visible_text(locator)
-    email = None
-    if label and "@" in label:
-        for part in label.replace("(", " ").replace(")", " ").split():
-            if "@" in part:
-                email = part.strip(",.;")
-                break
-    return email, label
+    try:
+        dom_labels = page.evaluate(
+            r"""
+() => Array.from(document.querySelectorAll('[aria-label],[alt],[title],[data-email],a[href*="SignOutOptions"]')).flatMap((el) => [
+  el.getAttribute('aria-label'),
+  el.getAttribute('alt'),
+  el.getAttribute('title'),
+  el.getAttribute('data-email'),
+  el.getAttribute('href'),
+  el.innerText,
+  el.textContent,
+]).filter(Boolean).map((value) => String(value).replace(/\s+/g, ' ').trim()).filter((value) => /Google Account|@|SignOutOptions/i.test(value))
+"""
+        )
+    except Exception:  # noqa: BLE001
+        dom_labels = []
+    for label in dom_labels:
+        email = _email_from_text(label)
+        if email:
+            return email, label
+
+    locator = first_visible(page, ACCOUNT_LOCATORS, timeout_ms=3000)
+    labels = [label for label in (safe_attr(locator, "aria-label"), safe_attr(locator, "alt"), safe_attr(locator, "title"), visible_text(locator)) if label]
+    for label in labels:
+        email = _email_from_text(label)
+        if email:
+            return email, label
+
+    if locator is not None:
+        try:
+            locator.click(timeout=1000)
+            page.wait_for_timeout(300)
+        except Exception:  # noqa: BLE001
+            pass
+        for popover in ACCOUNT_POPOVER_LOCATORS:
+            popover_locator = first_visible(page, [popover], timeout_ms=500)
+            text = visible_text(popover_locator)
+            email = _email_from_text(text)
+            if email:
+                return email, text
+
+    return None, labels[0] if labels else None
+
+
+def _showing_sign_in(session, *, timeout_ms: int = 500) -> bool:
+    page = session.page
+    return _is_google_login_url(page.url) or first_visible(page, SIGN_IN_LOCATORS, timeout_ms=timeout_ms) is not None
 
 
 def ensure_logged_in(session) -> dict:
@@ -79,26 +134,26 @@ def ensure_logged_in(session) -> dict:
     if blocking:
         raise GeminiUnavailableError(blocking)
 
-    account = _current_authenticated_account(session, timeout_ms=500, include_account_hint=False)
-    if account is not None:
-        return account
-
-    if _is_google_login_url(page.url) or first_visible(page, SIGN_IN_LOCATORS, timeout_ms=500) is not None:
+    if _showing_sign_in(session, timeout_ms=500):
         raise InteractiveAuthenticationRequired(
             "Interactive authentication is required. Run `geminiwebapp-cli login --interactive --wait --timeout 300`, "
             "complete Google login manually in Camoufox, then rerun this command."
         )
+
+    account = _current_authenticated_account(session, timeout_ms=500)
+    if account is not None:
+        return account
 
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         blocking = _blocking_state(session)
         if blocking:
             raise GeminiUnavailableError(blocking)
-        account = _current_authenticated_account(session, timeout_ms=500, include_account_hint=False)
+        if _showing_sign_in(session, timeout_ms=300):
+            raise InteractiveAuthenticationRequired("Gemini is showing a Google sign-in flow")
+        account = _current_authenticated_account(session, timeout_ms=500)
         if account is not None:
             return account
-        if _is_google_login_url(page.url) or first_visible(page, SIGN_IN_LOCATORS, timeout_ms=300) is not None:
-            raise InteractiveAuthenticationRequired("Gemini is showing a Google sign-in flow")
         time.sleep(0.5)
 
     raise AuthenticationError(f"Gemini did not reach an authenticated app page; current URL: {page.url}")
@@ -131,6 +186,8 @@ def _current_authenticated_account(session, *, timeout_ms: int = 1000, include_a
         raise GeminiUnavailableError(blocking)
     if not _is_gemini_url(page.url):
         return None
+    if _showing_sign_in(session, timeout_ms=100):
+        return None
     if first_visible(page, AUTHENTICATED_LOCATORS, timeout_ms=timeout_ms) is None:
         return None
     if not include_account_hint:
@@ -146,7 +203,7 @@ def auth_status(session) -> dict:
         return {
             "ok": True,
             "authenticated": False,
-            "state": "login_required",
+            "state": "signed_out",
             "message": str(exc),
             "next_command": "geminiwebapp-cli login --interactive --wait --timeout 300",
         }
