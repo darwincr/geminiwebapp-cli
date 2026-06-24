@@ -18,6 +18,7 @@ from geminiwebapp_cli.conf import (
     browser_headless,
     geminiwebapp_cli_home,
 )
+from geminiwebapp_cli.profile_locks import remove_stale_chromium_locks
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class GeminiSession:
 
         path = profile_dir(self.name)
         path.mkdir(parents=True, exist_ok=True)
+        remove_stale_chromium_locks(path)
         self._browser_cm = Camoufox(
             persistent_context=True,
             user_data_dir=str(path),
