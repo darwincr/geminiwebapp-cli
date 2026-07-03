@@ -44,7 +44,7 @@ uv run geminiwebapp-cli chats read 1 --json
 uv run geminiwebapp-cli chats status 1 --json
 uv run geminiwebapp-cli chats research 1 --json
 uv run geminiwebapp-cli chats research 1 --wait --timeout 900 --poll-interval 30 --json
-uv run geminiwebapp-cli chats research 1 --wait --timeout 1800 --compact --json
+uv run geminiwebapp-cli chats research 1 --wait --timeout 1800 --json
 uv run geminiwebapp-cli chats images 1 --json
 uv run geminiwebapp-cli chats videos 1 --json
 uv run geminiwebapp-cli chats music 1 --json
@@ -152,24 +152,20 @@ Gemini presents a research plan. By default it returns after research starts wit
 `response.research.status: in_progress`, the plan, the chat URL, `next_command`,
 `wait_command`, `status_command`, and `recommended_poll_seconds`. Agents should
 prefer the returned `next_command`/`wait_command` because it uses a single blocking
-CLI call with internal polling and compact output. Add `--wait` or
-`--wait-research-complete` to the original `chats new` command only when you want
-that command to block until the completed report is available.
+CLI call with internal polling that returns the completed report in one result.
+Add `--wait` or `--wait-research-complete` to the original `chats new` command only
+when you want that command to block until the completed report is available.
 
 Completed Deep Research report content is stored in `research.report.text`;
-`research.text` is a short status summary. Use `--compact` with `chats research`
-or `chats status` for token-efficient agent workflows. Compact mode returns the
-status, source count, a short report preview, and a `full_report_command` instead
-of the full report and all sources. Run the full report command when the complete
-text is actually needed. You can also retrieve a completed Deep Research report
-later with `chats read <chat> --json`, which includes `research` when the report is
-visible. Use `chats status <chat> --json` for generic agent polling; it returns
-`type: deep_research` with `research.status` for Deep Research chats, otherwise it
-returns a normal chat status and visible messages. Use `chats research <chat>
---json` when you explicitly want Deep Research status only. It returns
-`research.status: in_progress` while the report is still running, `completed` with
-`research.report.text` and sources when the report is visible, or `not_found` when
-the chat does not contain visible Deep Research state. Add `--wait --timeout
+`research.text` is a short status summary. You can also retrieve a completed Deep
+Research report later with `chats read <chat> --json`, which includes `research`
+when the report is visible. Use `chats status <chat> --json` for generic agent
+polling; it returns `type: deep_research` with `research.status` for Deep Research
+chats, otherwise it returns a normal chat status and visible messages. Use
+`chats research <chat> --json` when you explicitly want Deep Research status only.
+It returns `research.status: in_progress` while the report is still running,
+`completed` with `research.report.text` and sources when the report is visible, or
+`not_found` when the chat does not contain visible Deep Research state. Add `--wait --timeout
 SECONDS --poll-interval SECONDS` to poll until completion inside the CLI.
 
 Deep Research wait mode defaults to a 900 second timeout when `--timeout` is not

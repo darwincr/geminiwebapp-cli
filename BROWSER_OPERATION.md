@@ -38,7 +38,7 @@ geminiwebapp-cli chats read 1 --json
 geminiwebapp-cli chats status 1 --json
 geminiwebapp-cli chats research 1 --json
 geminiwebapp-cli chats research 1 --wait --timeout 900 --poll-interval 30 --json
-geminiwebapp-cli chats research 1 --wait --timeout 1800 --compact --json
+geminiwebapp-cli chats research 1 --wait --timeout 1800 --json
 geminiwebapp-cli chats images 1 --json
 geminiwebapp-cli chats videos 1 --json
 geminiwebapp-cli chats music 1 --json
@@ -77,12 +77,11 @@ For Deep Research, the CLI clicks `Start research` after Gemini shows the plan
 and returns once research is in progress. The JSON includes `next_command`,
 `wait_command`, `status_command`, and `recommended_poll_seconds` for agent
 polling. Prefer `next_command`/`wait_command` for token-efficient workflows; it
-uses one blocking CLI call with internal polling and compact output. Add `--wait`
-or `--wait-research-complete` to wait for the final report and include report
-text and sources in JSON output. Use `--compact` with `chats research` or `chats
-status` to return status, source count, and a short report preview instead of the
-full report. Use `chats read <chat> --json` later to retrieve a completed report
-from an existing Deep Research chat.
+uses one blocking CLI call with internal polling that returns the completed
+report and sources in one result. Add `--wait` or `--wait-research-complete` to
+wait for the final report and include report text and sources in JSON output.
+Use `chats read <chat> --json` later to retrieve a completed report from an
+existing Deep Research chat.
 Completed report content is stored at `research.report.text`; `research.text` is
 a short status summary.
 Deep Research wait mode defaults to 900 seconds when `--timeout` is omitted;
@@ -93,8 +92,7 @@ chats, otherwise it returns a normal chat status and visible messages.
 Use `chats research <chat> --json` to poll an existing Deep Research chat. It
 returns `research.status: in_progress`, `completed`, or `not_found`. Add
 `--wait --timeout SECONDS --poll-interval SECONDS` to wait for completion inside
-the CLI. Add `--compact` when an agent only needs completion metadata and a short
-preview.
+the CLI.
 
 Use `chats images <chat> --json` to save visible generated images from an
 existing chat into the current directory. Add `--output-dir DIR` to save them

@@ -273,7 +273,7 @@ def read_chat(session, chat: str, *, limit: int = 20) -> dict:
     return result
 
 
-def research_status(session, chat: str, *, wait: bool = False, timeout: int = 180, poll_interval: int = 2, compact: bool = False) -> dict:
+def research_status(session, chat: str, *, wait: bool = False, timeout: int = 180, poll_interval: int = 2) -> dict:
     ensure_logged_in(session)
     page = session.page
     deadline = time.monotonic() + timeout
@@ -287,12 +287,10 @@ def research_status(session, chat: str, *, wait: bool = False, timeout: int = 18
         except ResponseTimeoutError as exc:
             latest = str(exc).split("latest status:", 1)[1].strip() if "latest status:" in str(exc) else research.get("text", "")
             raise ResponseTimeoutError(f"Deep Research report did not complete within {timeout} seconds; latest status: {latest}") from exc
-    if compact:
-        research = _compact_research_payload(research, chat=opened)
     return {"ok": True, "chat": opened, "research": research, "url": page.url}
 
 
-def chat_status(session, chat: str, *, wait: bool = False, timeout: int = 180, poll_interval: int = 2, compact: bool = False) -> dict:
+def chat_status(session, chat: str, *, wait: bool = False, timeout: int = 180, poll_interval: int = 2) -> dict:
     ensure_logged_in(session)
     page = session.page
     deadline = time.monotonic() + timeout
@@ -307,8 +305,6 @@ def chat_status(session, chat: str, *, wait: bool = False, timeout: int = 180, p
             except ResponseTimeoutError as exc:
                 latest = str(exc).split("latest status:", 1)[1].strip() if "latest status:" in str(exc) else research.get("text", "")
                 raise ResponseTimeoutError(f"Deep Research report did not complete within {timeout} seconds; latest status: {latest}") from exc
-        if compact:
-            research = _compact_research_payload(research, chat=opened)
         return {"ok": True, "chat": opened, "type": "deep_research", "research": research, "url": page.url}
 
     messages = _visible_messages(page, limit=20)
@@ -1459,41 +1455,7 @@ def _research_wait_command(chat: dict | None) -> str | None:
     url = (chat or {}).get("url") or (chat or {}).get("id")
     if not url:
         return None
-    return f"geminiwebapp-cli chats research {shlex.quote(str(url))} --wait --timeout 1800 --poll-interval 30 --compact --json"
-
-
-def _compact_research_payload(research: dict, *, chat: dict | None = None) -> dict:
-    report_text = ((research.get("report") or {}).get("text") or "").strip()
-    sources = research.get("sources") or []
-    compact = {
-        "status": research.get("status"),
-        "text": research.get("text") or research.get("status") or "",
-        "report": None,
-        "sources": [],
-        "source_count": len(sources),
-        "last_checked_at": research.get("last_checked_at"),
-    }
-    if report_text:
-        preview = report_text[:800].rstrip()
-        compact["report"] = {
-            "chars": len(report_text),
-            "preview": preview,
-            "truncated": len(report_text) > len(preview),
-        }
-    if sources:
-        compact["source_preview"] = sources[:5]
-    plan = research.get("plan") or ""
-    if plan and research.get("status") != "completed":
-        compact["plan_preview"] = plan[:500].rstrip()
-    resolved_chat = research.get("chat") or chat
-    if resolved_chat:
-        compact["chat"] = resolved_chat
-        compact["status_command"] = _research_status_command(resolved_chat)
-        compact["wait_command"] = _research_wait_command(resolved_chat)
-        compact["full_report_command"] = f"geminiwebapp-cli chats research {shlex.quote(str(resolved_chat.get('url') or resolved_chat.get('id')))} --json"
-    if research.get("status") == "in_progress":
-        compact["recommended_poll_seconds"] = research.get("recommended_poll_seconds", 120)
-    return compact
+    return f"geminiwebapp-cli chats research {shlex.quote(str(url))} --wait --timeout 1800 --poll-interval 30 --json"
 
 
 def _trim_research_report_text(text: str) -> str:

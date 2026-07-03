@@ -196,13 +196,13 @@ def _verb_chats_read(session, args) -> dict:
 def _verb_chats_research(session, args) -> dict:
     from geminiwebapp_cli.actions.chats import research_status
 
-    return research_status(session, args.chat, wait=args.wait, timeout=_research_timeout(args), poll_interval=args.poll_interval, compact=args.compact)
+    return research_status(session, args.chat, wait=args.wait, timeout=_research_timeout(args), poll_interval=args.poll_interval)
 
 
 def _verb_chats_status(session, args) -> dict:
     from geminiwebapp_cli.actions.chats import chat_status
 
-    return chat_status(session, args.chat, wait=args.wait, timeout=_research_timeout(args), poll_interval=args.poll_interval, compact=args.compact)
+    return chat_status(session, args.chat, wait=args.wait, timeout=_research_timeout(args), poll_interval=args.poll_interval)
 
 
 def _verb_chats_images(session, args) -> dict:
@@ -501,14 +501,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_chats_research.add_argument("--wait", action="store_true", help="Wait until the Deep Research report is completed")
     p_chats_research.add_argument("--timeout", type=int, default=DEFAULT_RESPONSE_TIMEOUT_S, help=f"Maximum seconds to wait with --wait (default: {DEFAULT_DEEP_RESEARCH_TIMEOUT_S} when --wait is used)")
     p_chats_research.add_argument("--poll-interval", type=int, default=DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S, help=f"Seconds between completion checks with --wait (default: {DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S})")
-    p_chats_research.add_argument("--compact", action="store_true", help="Return compact Deep Research metadata instead of full report text and sources")
 
     p_chats_status = chats_sub.add_parser("status", parents=[common], help="Open a chat and auto-detect Deep Research or normal chat status")
     p_chats_status.add_argument("chat", help="Chat URL, /app path, Gemini chat id, or 1-based index from the sidebar")
     p_chats_status.add_argument("--wait", action="store_true", help="If the chat contains in-progress Deep Research, wait until completion")
     p_chats_status.add_argument("--timeout", type=int, default=DEFAULT_RESPONSE_TIMEOUT_S, help=f"Maximum seconds to wait with --wait (default: {DEFAULT_DEEP_RESEARCH_TIMEOUT_S} when --wait is used)")
     p_chats_status.add_argument("--poll-interval", type=int, default=DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S, help=f"Seconds between completion checks with --wait (default: {DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S})")
-    p_chats_status.add_argument("--compact", action="store_true", help="Return compact Deep Research metadata instead of full report text and sources")
 
     p_chats_images = chats_sub.add_parser("images", parents=[common], help="Save visible generated images from an existing chat")
     p_chats_images.add_argument("chat", help="Chat URL, /app path, Gemini chat id, or 1-based index from the sidebar")
