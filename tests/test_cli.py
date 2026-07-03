@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from geminiwebapp_cli.actions.auth import _email_from_text
-from geminiwebapp_cli.actions.chats import _response_payload, _select_video_aspect_ratio_if_needed, _tool_label, _video_aspect_ratio_label, chat_id_from_url, chat_url
-from geminiwebapp_cli.cli import _argv_with_prompt_text, _image_output_dir, _parse_args, build_parser
-from geminiwebapp_cli.conf import DEFAULT_DEEP_RESEARCH_TIMEOUT_S, DEFAULT_RESPONSE_TIMEOUT_S, GEMINI_APP_URL, GEMINI_BASE_URL, load_dotenv_file
+from geminiwebapp_cli.actions.chats import _compact_research_payload, _research_payload, _response_payload, _select_video_aspect_ratio_if_needed, _tool_label, _trim_research_report_text, _video_aspect_ratio_label, chat_id_from_url, chat_url
+from geminiwebapp_cli.cli import _argv_with_prompt_text, _image_output_dir, _parse_args, _research_timeout, build_parser
+from geminiwebapp_cli.conf import DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S, DEFAULT_DEEP_RESEARCH_TIMEOUT_S, DEFAULT_RESPONSE_TIMEOUT_S, GEMINI_APP_URL, GEMINI_BASE_URL, load_dotenv_file
 from geminiwebapp_cli.cli import _chat_timeout
 
 
@@ -309,12 +309,66 @@ class TestCliParsing:
         assert args.limit == 10
 
     def test_chats_research(self):
-        args = _parse_args(["chats", "research", "abc", "--wait", "--timeout", "900", "--json"])
+        args = _parse_args(["chats", "research", "abc", "--wait", "--timeout", "900", "--poll-interval", "30", "--json"])
         assert args.verb == "chats-research"
         assert args.chat == "abc"
         assert args.wait is True
         assert args.timeout == 900
+        assert args.poll_interval == 30
+        assert args.compact is False
         assert args.json is True
+
+    def test_chats_research_compact_default_poll_interval(self):
+        args = _parse_args(["chats", "research", "abc", "--wait", "--compact"])
+        assert args.compact is True
+        assert args.poll_interval == DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S
+
+    def test_chats_research_wait_uses_longer_default_timeout(self):
+        args = _parse_args(["chats", "research", "abc", "--wait"])
+        assert args.timeout == DEFAULT_RESPONSE_TIMEOUT_S
+        assert _research_timeout(args) == DEFAULT_DEEP_RESEARCH_TIMEOUT_S
+
+    def test_chats_research_explicit_timeout_overrides_default(self):
+        args = _parse_args(["chats", "research", "abc", "--wait", "--timeout", "60"])
+        assert _research_timeout(args) == 60
+
+    def test_chats_status(self):
+        args = _parse_args(["chats", "status", "abc", "--wait", "--poll-interval", "60", "--json"])
+        assert args.verb == "chats-status"
+        assert args.chat == "abc"
+        assert args.wait is True
+        assert args.poll_interval == 60
+        assert args.compact is False
+        assert args.json is True
+
+    def test_research_payload_includes_agent_metadata(self):
+        payload = _research_payload("in_progress", text="Deep Research started", chat={"url": "https://gemini.google.com/app/abc"})
+        assert payload["next_command"] == "geminiwebapp-cli chats research https://gemini.google.com/app/abc --wait --timeout 1800 --poll-interval 30 --compact --json"
+        assert payload["wait_command"] == "geminiwebapp-cli chats research https://gemini.google.com/app/abc --wait --timeout 1800 --poll-interval 30 --compact --json"
+        assert payload["status_command"] == "geminiwebapp-cli chats status https://gemini.google.com/app/abc --json"
+        assert payload["recommended_poll_seconds"] == 120
+        assert payload["last_checked_at"].endswith("Z")
+
+    def test_compact_research_payload_summarizes_completed_report(self):
+        payload = _compact_research_payload(
+            {
+                "status": "completed",
+                "text": "Deep Research completed",
+                "report": {"text": "A" * 1000},
+                "sources": [{"title": f"source {index}", "url": f"https://example.com/{index}"} for index in range(6)],
+                "last_checked_at": "2026-01-01T00:00:00Z",
+            },
+            chat={"url": "https://gemini.google.com/app/abc"},
+        )
+
+        assert payload["report"] == {"chars": 1000, "preview": "A" * 800, "truncated": True}
+        assert payload["source_count"] == 6
+        assert len(payload["source_preview"]) == 5
+        assert payload["full_report_command"] == "geminiwebapp-cli chats research https://gemini.google.com/app/abc --json"
+
+    def test_trim_research_report_text_removes_progress_artifacts(self):
+        text = "Final report body. Sources read but not used in the report example.com Thoughts Mapping the Gemini Ecosystem"
+        assert _trim_research_report_text(text) == "Final report body."
 
     def test_parser_contains_chats(self):
         parser = build_parser()

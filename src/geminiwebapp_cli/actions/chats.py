@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+import shlex
 import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from math import ceil
 from pathlib import Path
 
@@ -141,6 +143,7 @@ def new_chat(
     model: str | None = None,
     plus_options: Sequence[str] = (),
     wait_research_complete: bool = False,
+    poll_interval: int = 2,
     output_dir: Path | None = None,
     aspect_ratio: str | None = None,
     dry_run: bool = False,
@@ -169,7 +172,7 @@ def new_chat(
         response_text = _wait_for_music_generation(page, before_music_count=before_music_count, before_failure=before_failure, timeout=timeout)
     else:
         response_text = _wait_for_response(page, before_signature=before, timeout=timeout)
-    research = _confirm_deep_research_if_needed(page, response_text, selected=selected, timeout=timeout, wait_complete=wait_research_complete)
+    research = _confirm_deep_research_if_needed(page, response_text, selected=selected, timeout=timeout, wait_complete=wait_research_complete, poll_interval=poll_interval)
     response_text = _response_text_for_research(research, response_text)
     response = _response_payload(response_text)
     if research is not None:
@@ -202,6 +205,7 @@ def send_to_chat(
     model: str | None = None,
     plus_options: Sequence[str] = (),
     wait_research_complete: bool = False,
+    poll_interval: int = 2,
     output_dir: Path | None = None,
     aspect_ratio: str | None = None,
     dry_run: bool = False,
@@ -233,7 +237,7 @@ def send_to_chat(
         response_text = _wait_for_music_generation(page, before_music_count=before_music_count, before_failure=before_failure, timeout=timeout)
     else:
         response_text = _wait_for_response(page, before_signature=before, timeout=timeout)
-    research = _confirm_deep_research_if_needed(page, response_text, selected=selected, timeout=timeout, wait_complete=wait_research_complete)
+    research = _confirm_deep_research_if_needed(page, response_text, selected=selected, timeout=timeout, wait_complete=wait_research_complete, poll_interval=poll_interval)
     response_text = _response_text_for_research(research, response_text)
     response = _response_payload(response_text)
     if research is not None:
@@ -269,20 +273,58 @@ def read_chat(session, chat: str, *, limit: int = 20) -> dict:
     return result
 
 
-def research_status(session, chat: str, *, wait: bool = False, timeout: int = 180) -> dict:
+def research_status(session, chat: str, *, wait: bool = False, timeout: int = 180, poll_interval: int = 2, compact: bool = False) -> dict:
     ensure_logged_in(session)
     page = session.page
     deadline = time.monotonic() + timeout
     opened = _open_chat(page, chat)
+    _scroll_messages_down(page)
     research = _extract_research_status(page)
     if wait and research.get("status") == "in_progress":
         remaining = max(1, int(deadline - time.monotonic()))
         try:
-            research = _wait_for_deep_research_report(page, timeout=remaining, plan=research.get("plan") or "", chat=opened)
+            research = _wait_for_deep_research_report(page, timeout=remaining, plan=research.get("plan") or "", chat=opened, poll_interval=poll_interval)
         except ResponseTimeoutError as exc:
             latest = str(exc).split("latest status:", 1)[1].strip() if "latest status:" in str(exc) else research.get("text", "")
             raise ResponseTimeoutError(f"Deep Research report did not complete within {timeout} seconds; latest status: {latest}") from exc
+    if compact:
+        research = _compact_research_payload(research, chat=opened)
     return {"ok": True, "chat": opened, "research": research, "url": page.url}
+
+
+def chat_status(session, chat: str, *, wait: bool = False, timeout: int = 180, poll_interval: int = 2, compact: bool = False) -> dict:
+    ensure_logged_in(session)
+    page = session.page
+    deadline = time.monotonic() + timeout
+    opened = _open_chat(page, chat)
+    _scroll_messages_down(page)
+    research = _extract_research_status(page)
+    if research.get("status") != "not_found":
+        if wait and research.get("status") == "in_progress":
+            remaining = max(1, int(deadline - time.monotonic()))
+            try:
+                research = _wait_for_deep_research_report(page, timeout=remaining, plan=research.get("plan") or "", chat=opened, poll_interval=poll_interval)
+            except ResponseTimeoutError as exc:
+                latest = str(exc).split("latest status:", 1)[1].strip() if "latest status:" in str(exc) else research.get("text", "")
+                raise ResponseTimeoutError(f"Deep Research report did not complete within {timeout} seconds; latest status: {latest}") from exc
+        if compact:
+            research = _compact_research_payload(research, chat=opened)
+        return {"ok": True, "chat": opened, "type": "deep_research", "research": research, "url": page.url}
+
+    messages = _visible_messages(page, limit=20)
+    return {
+        "ok": True,
+        "chat": opened,
+        "type": "chat",
+        "status": "available" if messages else "empty",
+        "messages": messages,
+        "media": {
+            "images": len(_visible_chat_images(page)),
+            "videos": len(_visible_chat_videos(page)),
+            "music": len(_visible_chat_music(page)),
+        },
+        "url": page.url,
+    }
 
 
 def save_chat_images(session, chat: str, *, output_dir: Path) -> dict:
@@ -360,25 +402,71 @@ def _open_new_chat(page) -> None:
 
 
 def _open_chat(page, chat: str) -> dict:
+    clicked_sidebar = False
     if chat.isdigit():
+        _open_sidebar_if_needed(page)
         chats = _collect_chats(page, limit=max(int(chat), 20))
         index = int(chat) - 1
         if index < 0 or index >= len(chats):
             raise ChatNotFoundError(f"Could not resolve chat index {chat}; only found {len(chats)} visible chat(s)")
         url = chats[index].get("url")
+        clicked_sidebar = _click_sidebar_chat(page, url)
     else:
         url = chat_url(chat)
 
     if not url:
         raise ChatNotFoundError(f"Could not resolve chat {chat!r}")
-    goto_domcontentloaded(page, url)
+    target_id = chat_id_from_url(url)
+    if not clicked_sidebar:
+        goto_domcontentloaded(page, url)
     try:
         page.wait_for_url(re.compile(r".*/app(/.*)?"), timeout=15000)
     except PlaywrightTimeoutError:
         pass
-    if first_visible(page, PROMPT_LOCATORS, timeout_ms=12000) is None and not _visible_messages(page, limit=1):
+    _wait_for_chat_content(page, timeout_ms=15000, accept_prompt=target_id is None)
+    if not _has_chat_content(page, accept_prompt=target_id is None) and not clicked_sidebar:
+        goto_domcontentloaded(page, GEMINI_APP_URL)
+        page.wait_for_timeout(1000)
+        _open_sidebar_if_needed(page)
+        if _click_sidebar_chat(page, url):
+            _wait_for_chat_content(page, timeout_ms=15000, accept_prompt=target_id is None)
+    if not _has_chat_content(page, accept_prompt=target_id is None):
         raise ChatNotFoundError(f"Could not open Gemini chat {chat!r}; current URL: {page.url}")
     return {"id": chat_id_from_url(page.url) or chat_id_from_url(url), "url": clean_url(page.url)}
+
+
+def _click_sidebar_chat(page, url: str | None) -> bool:
+    if not url:
+        return False
+    chat_id = chat_id_from_url(url)
+    if not chat_id:
+        return False
+    deadline = time.monotonic() + 12
+    selector = f'a[href$="/app/{chat_id}"], a[href*="/app/{chat_id}"]'
+    while time.monotonic() < deadline:
+        try:
+            link = page.locator(selector).first
+            link.wait_for(state="visible", timeout=1000)
+            link.click(timeout=5000)
+            page.wait_for_load_state("domcontentloaded")
+            return True
+        except (PlaywrightTimeoutError, PlaywrightError):
+            page.wait_for_timeout(500)
+    return False
+
+
+def _wait_for_chat_content(page, *, timeout_ms: int, accept_prompt: bool = True) -> None:
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        if _has_chat_content(page, accept_prompt=accept_prompt):
+            return
+        page.wait_for_timeout(500)
+
+
+def _has_chat_content(page, *, accept_prompt: bool = True) -> bool:
+    if _extract_deep_research_report(page) is not None or _visible_messages(page, limit=1):
+        return True
+    return accept_prompt and first_visible(page, PROMPT_LOCATORS, timeout_ms=500) is not None
 
 
 def _visible_chat_images(page) -> list[dict]:
@@ -1057,10 +1145,15 @@ def _plus_menu_item(page, label: str, *, timeout_ms: int):
 
 
 def _open_plus_menu(page) -> None:
+    _dismiss_open_overlay(page)
     button = first_visible(page, PLUS_MENU_LOCATORS, timeout_ms=2500)
     if button is None:
         raise ElementNotFoundError("Could not find Gemini + menu button")
-    button.click()
+    try:
+        button.click(timeout=5000)
+    except PlaywrightError:
+        _dismiss_open_overlay(page)
+        button.click(timeout=5000, force=True)
     page.wait_for_timeout(700)
 
 
@@ -1183,7 +1276,7 @@ def _wait_for_response(page, *, before_signature: str, timeout: int) -> str:
     raise ResponseTimeoutError(f"Gemini did not produce a visible response within {timeout} seconds")
 
 
-def _confirm_deep_research_if_needed(page, response_text: str, *, selected: dict, timeout: int, wait_complete: bool) -> dict | None:
+def _confirm_deep_research_if_needed(page, response_text: str, *, selected: dict, timeout: int, wait_complete: bool, poll_interval: int) -> dict | None:
     if "Deep Research" not in (selected.get("tools") or []):
         return None
 
@@ -1199,12 +1292,13 @@ def _confirm_deep_research_if_needed(page, response_text: str, *, selected: dict
     chat = {"id": chat_id_from_url(page.url), "url": clean_url(page.url)}
     if not wait_complete:
         return _research_payload("in_progress", text="Deep Research started", chat=chat, plan=response_text)
-    return _wait_for_deep_research_report(page, timeout=timeout, plan=response_text, chat=chat)
+    return _wait_for_deep_research_report(page, timeout=timeout, plan=response_text, chat=chat, poll_interval=poll_interval)
 
 
-def _wait_for_deep_research_report(page, *, timeout: int, plan: str, chat: dict) -> dict:
+def _wait_for_deep_research_report(page, *, timeout: int, plan: str, chat: dict, poll_interval: int) -> dict:
     deadline = time.monotonic() + timeout
     status_text = ""
+    interval_ms = max(1, poll_interval) * 1000
     while time.monotonic() < deadline:
         report = _extract_deep_research_report(page)
         if report is not None:
@@ -1215,7 +1309,7 @@ def _wait_for_deep_research_report(page, *, timeout: int, plan: str, chat: dict)
         model_messages = [m for m in messages if m.get("role") != "user" and m.get("text")]
         if model_messages:
             status_text = model_messages[-1]["text"]
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(interval_ms)
     raise ResponseTimeoutError(f"Deep Research report did not complete within {timeout} seconds; latest status: {status_text[:240]}")
 
 
@@ -1251,7 +1345,7 @@ def _research_progress_text(text: str) -> str:
 
 def _extract_deep_research_report(page) -> dict | None:
     try:
-        return page.evaluate(
+        payload = page.evaluate(
             r"""
             () => {
               const visible = (node) => {
@@ -1259,12 +1353,48 @@ def _extract_deep_research_report(page) -> dict | None:
                 return !!rect && rect.width > 0 && rect.height > 0;
               };
               const clean = (text) => (text || '').replace(/\s+/g, ' ').trim();
-              const reportNodes = Array.from(document.querySelectorAll('structured-content-container[data-test-id="message-content"]'))
-                .filter((node) => visible(node) && clean(node.innerText || node.textContent).length > 500)
-                .sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height);
-              const reportNode = reportNodes[0];
+              const candidateSelectors = [
+                'structured-content-container[data-test-id="message-content"]',
+                'structured-content-container',
+                'message-content',
+                '[data-message-author-role="model"]',
+                '[class*="model-response"]',
+                '[class*="response-container"]',
+                'main markdown',
+                'main .markdown'
+              ];
+              const candidates = [];
+              const seenNodes = new Set();
+              for (const selector of candidateSelectors) {
+                for (const node of document.querySelectorAll(selector)) {
+                  if (!visible(node) || seenNodes.has(node)) continue;
+                  seenNodes.add(node);
+                  const text = clean(node.innerText || node.textContent || '');
+                  if (text.length < 80) continue;
+                  const lower = text.toLowerCase();
+                  const looksLikePlan = lower.includes('start research') && lower.includes('research websites');
+                  const hasCompletion = lower.includes("i've completed your research")
+                    || lower.includes('completed your research')
+                    || lower.includes('sources used in the report')
+                    || lower.includes('sources read but not used in the report');
+                  const hasReportStructure = lower.includes('sources used in the report')
+                    || lower.includes('executive')
+                    || lower.includes('key metrics')
+                    || lower.includes('summary');
+                  const isResearchReport = !looksLikePlan && (hasCompletion || (text.length > 500 && hasReportStructure));
+                  if (!isResearchReport) continue;
+                  candidates.push({ node, text });
+                }
+              }
+              candidates.sort((a, b) => {
+                const ar = a.node.getBoundingClientRect();
+                const br = b.node.getBoundingClientRect();
+                return b.text.length - a.text.length || br.top - ar.top;
+              });
+              const reportCandidate = candidates[0];
+              const reportNode = reportCandidate?.node;
               if (!reportNode) return null;
-              const text = clean(reportNode.innerText || reportNode.textContent || '');
+              const text = reportCandidate.text;
               if (!text) return null;
 
               const sourceRoot = Array.from(document.querySelectorAll('.source-list.used-sources, div.source-list.used-sources'))
@@ -1294,6 +1424,9 @@ def _extract_deep_research_report(page) -> dict | None:
         )
     except PlaywrightError:
         return None
+    if payload and (payload.get("report") or {}).get("text"):
+        payload["report"]["text"] = _trim_research_report_text(payload["report"]["text"])
+    return payload
 
 
 def _research_payload(status: str, *, text: str, report: dict | None = None, sources: list | None = None, plan: str | None = None, chat: dict | None = None) -> dict:
@@ -1302,7 +1435,81 @@ def _research_payload(status: str, *, text: str, report: dict | None = None, sou
         payload["plan"] = plan
     if chat is not None:
         payload["chat"] = chat
+        payload["next_command"] = _research_next_command(chat)
+        payload["status_command"] = _research_status_command(chat)
+        payload["wait_command"] = _research_wait_command(chat)
+    if status == "in_progress":
+        payload["recommended_poll_seconds"] = 120
+    payload["last_checked_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     return payload
+
+
+def _research_next_command(chat: dict | None) -> str | None:
+    return _research_wait_command(chat)
+
+
+def _research_status_command(chat: dict | None) -> str | None:
+    url = (chat or {}).get("url") or (chat or {}).get("id")
+    if not url:
+        return None
+    return f"geminiwebapp-cli chats status {shlex.quote(str(url))} --json"
+
+
+def _research_wait_command(chat: dict | None) -> str | None:
+    url = (chat or {}).get("url") or (chat or {}).get("id")
+    if not url:
+        return None
+    return f"geminiwebapp-cli chats research {shlex.quote(str(url))} --wait --timeout 1800 --poll-interval 30 --compact --json"
+
+
+def _compact_research_payload(research: dict, *, chat: dict | None = None) -> dict:
+    report_text = ((research.get("report") or {}).get("text") or "").strip()
+    sources = research.get("sources") or []
+    compact = {
+        "status": research.get("status"),
+        "text": research.get("text") or research.get("status") or "",
+        "report": None,
+        "sources": [],
+        "source_count": len(sources),
+        "last_checked_at": research.get("last_checked_at"),
+    }
+    if report_text:
+        preview = report_text[:800].rstrip()
+        compact["report"] = {
+            "chars": len(report_text),
+            "preview": preview,
+            "truncated": len(report_text) > len(preview),
+        }
+    if sources:
+        compact["source_preview"] = sources[:5]
+    plan = research.get("plan") or ""
+    if plan and research.get("status") != "completed":
+        compact["plan_preview"] = plan[:500].rstrip()
+    resolved_chat = research.get("chat") or chat
+    if resolved_chat:
+        compact["chat"] = resolved_chat
+        compact["status_command"] = _research_status_command(resolved_chat)
+        compact["wait_command"] = _research_wait_command(resolved_chat)
+        compact["full_report_command"] = f"geminiwebapp-cli chats research {shlex.quote(str(resolved_chat.get('url') or resolved_chat.get('id')))} --json"
+    if research.get("status") == "in_progress":
+        compact["recommended_poll_seconds"] = research.get("recommended_poll_seconds", 120)
+    return compact
+
+
+def _trim_research_report_text(text: str) -> str:
+    cleaned = " ".join((text or "").split())
+    if not cleaned:
+        return ""
+    cut_patterns = [
+        r"\bSources read but not used in the report\b",
+        r"\bThoughts\s+(Mapping|I am|Identifying|Investigating|Uncovering|Analyzing|Resolving|Formulating)\b",
+    ]
+    cut_at = len(cleaned)
+    for pattern in cut_patterns:
+        match = re.search(pattern, cleaned, re.I)
+        if match:
+            cut_at = min(cut_at, match.start())
+    return cleaned[:cut_at].rstrip()
 
 
 def _without_research_messages(messages: list[dict], research: dict) -> list[dict]:
@@ -1356,7 +1563,13 @@ def _open_sidebar_if_needed(page) -> None:
     ]
     toggle = first_visible(page, toggles, timeout_ms=1000)
     if toggle is not None:
-        toggle.click()
+        try:
+            toggle.click(timeout=2500)
+        except PlaywrightError:
+            try:
+                toggle.click(force=True, timeout=2500)
+            except PlaywrightError:
+                return
         page.wait_for_timeout(700)
 
 
@@ -1508,3 +1721,25 @@ def _scroll_messages_up(page, *, scrolls: int) -> None:
             page.wait_for_timeout(700)
         except PlaywrightError:
             return
+
+
+def _scroll_messages_down(page) -> None:
+    try:
+        page.evaluate(
+            r"""
+            () => {
+              const candidates = Array.from(document.querySelectorAll('main, [role="main"], [class*="conversation"], [class*="chat"]'));
+              const scrollables = candidates
+                .filter((node) => {
+                  const rect = node.getBoundingClientRect();
+                  return rect && rect.width > 200 && rect.height > 200 && node.scrollHeight > node.clientHeight + 40;
+                })
+                .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+              if (scrollables[0]) scrollables[0].scrollTop = scrollables[0].scrollHeight;
+              else window.scrollTo(0, document.body.scrollHeight);
+            }
+            """
+        )
+        page.wait_for_timeout(700)
+    except PlaywrightError:
+        return

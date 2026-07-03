@@ -35,8 +35,10 @@ geminiwebapp-cli chats new --text "Research this" --tool deep-research --wait --
 geminiwebapp-cli chats list --json
 geminiwebapp-cli chats tools --json
 geminiwebapp-cli chats read 1 --json
+geminiwebapp-cli chats status 1 --json
 geminiwebapp-cli chats research 1 --json
-geminiwebapp-cli chats research 1 --wait --timeout 900 --json
+geminiwebapp-cli chats research 1 --wait --timeout 900 --poll-interval 30 --json
+geminiwebapp-cli chats research 1 --wait --timeout 1800 --compact --json
 geminiwebapp-cli chats images 1 --json
 geminiwebapp-cli chats videos 1 --json
 geminiwebapp-cli chats music 1 --json
@@ -72,17 +74,27 @@ Use `--model flash-lite`, `--model flash`, or `--model pro` to select the model.
 Deep Research auto-selects Flash when no model is provided because Flash-Lite
 does not expose the Deep Research tool.
 For Deep Research, the CLI clicks `Start research` after Gemini shows the plan
-and returns once research is in progress. Add `--wait` or `--wait-research-complete` to wait
-for the final report and include report text and sources in JSON output. Use
-`chats read <chat> --json` later to retrieve a completed report from an existing
-Deep Research chat.
+and returns once research is in progress. The JSON includes `next_command`,
+`wait_command`, `status_command`, and `recommended_poll_seconds` for agent
+polling. Prefer `next_command`/`wait_command` for token-efficient workflows; it
+uses one blocking CLI call with internal polling and compact output. Add `--wait`
+or `--wait-research-complete` to wait for the final report and include report
+text and sources in JSON output. Use `--compact` with `chats research` or `chats
+status` to return status, source count, and a short report preview instead of the
+full report. Use `chats read <chat> --json` later to retrieve a completed report
+from an existing Deep Research chat.
 Completed report content is stored at `research.report.text`; `research.text` is
 a short status summary.
 Deep Research wait mode defaults to 900 seconds when `--timeout` is omitted;
 normal chat response waits default to 180 seconds.
+Use `chats status <chat> --json` when you want the CLI to auto-detect the chat
+type. It returns `type: deep_research` plus `research.status` for Deep Research
+chats, otherwise it returns a normal chat status and visible messages.
 Use `chats research <chat> --json` to poll an existing Deep Research chat. It
 returns `research.status: in_progress`, `completed`, or `not_found`. Add
-`--wait --timeout SECONDS` to wait for completion.
+`--wait --timeout SECONDS --poll-interval SECONDS` to wait for completion inside
+the CLI. Add `--compact` when an agent only needs completion metadata and a short
+preview.
 
 Use `chats images <chat> --json` to save visible generated images from an
 existing chat into the current directory. Add `--output-dir DIR` to save them

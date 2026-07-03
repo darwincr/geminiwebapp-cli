@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from geminiwebapp_cli.conf import DEFAULT_DEEP_RESEARCH_TIMEOUT_S, DEFAULT_RESPONSE_TIMEOUT_S, load_dotenv_file
+from geminiwebapp_cli.conf import DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S, DEFAULT_DEEP_RESEARCH_TIMEOUT_S, DEFAULT_RESPONSE_TIMEOUT_S, load_dotenv_file
 from geminiwebapp_cli.exceptions import (
     AuthenticationError,
     ChatNotFoundError,
@@ -90,6 +90,12 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     elif command == "chats-research":
         research = result.get("research") or {}
         _out(research.get("text") or research.get("status") or "")
+    elif command == "chats-status":
+        if result.get("type") == "deep_research":
+            research = result.get("research") or {}
+            _out(research.get("text") or research.get("status") or "")
+        else:
+            _out(result.get("status") or result.get("type") or "")
     elif command == "chats-images":
         images = result.get("images") or []
         _out("(no images)" if not images else "\n".join(str(image.get("path") or "") for image in images))
@@ -154,6 +160,7 @@ def _verb_chats_new(session, args) -> dict:
         model=args.model,
         plus_options=args.plus_option,
         wait_research_complete=args.wait_research_complete,
+        poll_interval=args.poll_interval,
         output_dir=_media_output_dir(args),
         aspect_ratio=args.aspect_ratio,
         dry_run=args.dry_run,
@@ -173,6 +180,7 @@ def _verb_chats_send(session, args) -> dict:
         model=args.model,
         plus_options=args.plus_option,
         wait_research_complete=args.wait_research_complete,
+        poll_interval=args.poll_interval,
         output_dir=_media_output_dir(args),
         aspect_ratio=args.aspect_ratio,
         dry_run=args.dry_run,
@@ -188,7 +196,13 @@ def _verb_chats_read(session, args) -> dict:
 def _verb_chats_research(session, args) -> dict:
     from geminiwebapp_cli.actions.chats import research_status
 
-    return research_status(session, args.chat, wait=args.wait, timeout=args.timeout)
+    return research_status(session, args.chat, wait=args.wait, timeout=_research_timeout(args), poll_interval=args.poll_interval, compact=args.compact)
+
+
+def _verb_chats_status(session, args) -> dict:
+    from geminiwebapp_cli.actions.chats import chat_status
+
+    return chat_status(session, args.chat, wait=args.wait, timeout=_research_timeout(args), poll_interval=args.poll_interval, compact=args.compact)
 
 
 def _verb_chats_images(session, args) -> dict:
@@ -211,6 +225,12 @@ def _verb_chats_music(session, args) -> dict:
 
 def _chat_timeout(args) -> int:
     if getattr(args, "timeout", None) == DEFAULT_RESPONSE_TIMEOUT_S and getattr(args, "wait_research_complete", False):
+        return DEFAULT_DEEP_RESEARCH_TIMEOUT_S
+    return args.timeout
+
+
+def _research_timeout(args) -> int:
+    if getattr(args, "timeout", None) == DEFAULT_RESPONSE_TIMEOUT_S and getattr(args, "wait", False):
         return DEFAULT_DEEP_RESEARCH_TIMEOUT_S
     return args.timeout
 
@@ -240,6 +260,7 @@ _VERBS = {
     "chats-continue": _verb_chats_send,
     "chats-read": _verb_chats_read,
     "chats-research": _verb_chats_research,
+    "chats-status": _verb_chats_status,
     "chats-images": _verb_chats_images,
     "chats-videos": _verb_chats_videos,
     "chats-music": _verb_chats_music,
@@ -414,6 +435,7 @@ def _add_plus_menu_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=f"With --tool deep-research, wait for the completed report and return report text/sources (default timeout: {DEFAULT_DEEP_RESEARCH_TIMEOUT_S}s)",
     )
+    parser.add_argument("--poll-interval", type=int, default=DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S, help=f"Seconds between Deep Research completion checks when using --wait (default: {DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S})")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -477,7 +499,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_chats_research = chats_sub.add_parser("research", parents=[common], help="Check Deep Research status or retrieve a completed report")
     p_chats_research.add_argument("chat", help="Chat URL, /app path, Gemini chat id, or 1-based index from the sidebar")
     p_chats_research.add_argument("--wait", action="store_true", help="Wait until the Deep Research report is completed")
-    p_chats_research.add_argument("--timeout", type=int, default=DEFAULT_RESPONSE_TIMEOUT_S, help=f"Maximum seconds to wait with --wait (default: {DEFAULT_RESPONSE_TIMEOUT_S})")
+    p_chats_research.add_argument("--timeout", type=int, default=DEFAULT_RESPONSE_TIMEOUT_S, help=f"Maximum seconds to wait with --wait (default: {DEFAULT_DEEP_RESEARCH_TIMEOUT_S} when --wait is used)")
+    p_chats_research.add_argument("--poll-interval", type=int, default=DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S, help=f"Seconds between completion checks with --wait (default: {DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S})")
+    p_chats_research.add_argument("--compact", action="store_true", help="Return compact Deep Research metadata instead of full report text and sources")
+
+    p_chats_status = chats_sub.add_parser("status", parents=[common], help="Open a chat and auto-detect Deep Research or normal chat status")
+    p_chats_status.add_argument("chat", help="Chat URL, /app path, Gemini chat id, or 1-based index from the sidebar")
+    p_chats_status.add_argument("--wait", action="store_true", help="If the chat contains in-progress Deep Research, wait until completion")
+    p_chats_status.add_argument("--timeout", type=int, default=DEFAULT_RESPONSE_TIMEOUT_S, help=f"Maximum seconds to wait with --wait (default: {DEFAULT_DEEP_RESEARCH_TIMEOUT_S} when --wait is used)")
+    p_chats_status.add_argument("--poll-interval", type=int, default=DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S, help=f"Seconds between completion checks with --wait (default: {DEFAULT_DEEP_RESEARCH_POLL_INTERVAL_S})")
+    p_chats_status.add_argument("--compact", action="store_true", help="Return compact Deep Research metadata instead of full report text and sources")
 
     p_chats_images = chats_sub.add_parser("images", parents=[common], help="Save visible generated images from an existing chat")
     p_chats_images.add_argument("chat", help="Chat URL, /app path, Gemini chat id, or 1-based index from the sidebar")
