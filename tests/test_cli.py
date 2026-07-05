@@ -52,6 +52,29 @@ class TestCliParsing:
         assert args.verb == "auth-status"
         assert args.json is True
 
+    def test_screenshot(self, tmp_path: Path):
+        output = tmp_path / "screenshot.png"
+        args = _parse_args(["screenshot", "--output", str(output), "--json"])
+        assert args.verb == "screenshot"
+        assert args.output == output
+        assert args.json is True
+
+    def test_screenshot_default_output(self):
+        args = _parse_args(["screenshot"])
+        assert args.verb == "screenshot"
+        assert args.output == Path("screenshot.png")
+
+    def test_screenshot_output_rewritten_before_worker(self, tmp_path: Path):
+        output = tmp_path / "screenshot.png"
+        argv = ["screenshot", "--output", str(output)]
+        args = _parse_args(argv)
+        assert _argv_with_prompt_text(args, argv) == ["screenshot", "--output", str(output.resolve())]
+
+    def test_screenshot_default_output_rewritten_before_worker(self):
+        argv = ["screenshot"]
+        args = _parse_args(argv)
+        assert _argv_with_prompt_text(args, argv) == ["screenshot", "--output", str(Path("screenshot.png").resolve())]
+
     def test_chats_list(self):
         args = _parse_args(["chats", "list", "--limit", "5"])
         assert args.verb == "chats-list"

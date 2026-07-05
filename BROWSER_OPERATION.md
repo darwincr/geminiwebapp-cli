@@ -42,6 +42,7 @@ geminiwebapp-cli chats research 1 --wait --timeout 1800 --json
 geminiwebapp-cli chats images 1 --json
 geminiwebapp-cli chats videos 1 --json
 geminiwebapp-cli chats music 1 --json
+geminiwebapp-cli screenshot --output screenshot.png --json
 geminiwebapp-cli chats send 1 --text "Follow up" --json
 geminiwebapp-cli session stop
 ```
@@ -52,6 +53,10 @@ from the visible sidebar list.
 Use `--input-file FILE` instead of `--text` for long prompts. The CLI reads the
 file before dispatching to the background worker, so relative paths are resolved
 from the directory where you ran the command.
+
+Use `screenshot --output FILE --json` to save the current browser page viewport
+from the active session. Relative output paths are resolved from the directory
+where you ran the command.
 
 Use `--dry-run` to exercise the browser flow without submitting the prompt. It
 opens the composer/chat, selects model/tool options, uploads files, and selects

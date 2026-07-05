@@ -8,10 +8,13 @@ import shutil
 import time
 from pathlib import Path
 
+from browserforge.fingerprints.generator import Screen
 from playwright.sync_api import Error as PlaywrightError
 
 from geminiwebapp_cli.conf import (
     BROWSER_DEFAULT_TIMEOUT_MS,
+    BROWSER_HEIGHT,
+    BROWSER_WIDTH,
     DEFAULT_MAX_PACE_S,
     DEFAULT_MIN_PACE_S,
     HUMAN_MOUSE_MAX_TIME_S,
@@ -81,6 +84,8 @@ class GeminiSession:
             user_data_dir=str(path),
             headless=browser_headless(),
             humanize=HUMAN_MOUSE_MAX_TIME_S,
+            screen=Screen(min_width=BROWSER_WIDTH, max_width=BROWSER_WIDTH, min_height=BROWSER_HEIGHT, max_height=BROWSER_HEIGHT),
+            window=(BROWSER_WIDTH, BROWSER_HEIGHT),
             os=["macos", "windows", "linux"],
             locale="en-US",
         )
@@ -88,6 +93,7 @@ class GeminiSession:
         self.context.set_default_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
         self.context.set_default_navigation_timeout(BROWSER_DEFAULT_TIMEOUT_MS)
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
+        self.page.set_viewport_size({"width": BROWSER_WIDTH, "height": BROWSER_HEIGHT})
         logger.debug("Opened Camoufox profile %s", path)
 
     def wait(self, min_delay: float = DEFAULT_MIN_PACE_S, max_delay: float = DEFAULT_MAX_PACE_S) -> None:

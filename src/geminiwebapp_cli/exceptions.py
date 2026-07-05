@@ -36,3 +36,7 @@ class VideoDownloadError(GeminiWebappCliError):
 
 class MusicDownloadError(GeminiWebappCliError):
     """Generated music was visible but could not be downloaded."""
+
+
+class ScreenshotError(GeminiWebappCliError):
+    """The browser page screenshot could not be captured."""

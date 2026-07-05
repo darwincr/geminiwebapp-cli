@@ -48,6 +48,7 @@ uv run geminiwebapp-cli chats research 1 --wait --timeout 1800 --json
 uv run geminiwebapp-cli chats images 1 --json
 uv run geminiwebapp-cli chats videos 1 --json
 uv run geminiwebapp-cli chats music 1 --json
+uv run geminiwebapp-cli screenshot --output screenshot.png --json
 uv run geminiwebapp-cli chats send 1 --text "Make it funnier" --json
 uv run geminiwebapp-cli session stop
 ```
@@ -77,6 +78,7 @@ login state. Run `session clear` only when you want to delete the saved profile.
 | `login --interactive --wait --timeout 300` | Open Gemini, wait for manual login completion, then exit automatically. |
 | `auth status` | Report whether the current session is authenticated. |
 | `auth interactive` | Open Gemini and keep the browser alive while you log in manually. |
+| `screenshot --output screenshot.png` | Save a screenshot of the current browser page in the active session. |
 | `chats list` | List visible recent chats from the sidebar. |
 | `chats tools` | Open Gemini's `+` menu and list visible options for `--tool` and `--plus-option`. |
 | `chats new --text TEXT` | Open the Gemini `/app` composer, type a prompt, submit it, wait for Gemini to finish, and print the response. |
@@ -122,6 +124,10 @@ because the browser operation completed, but `response.done` is `false` and
 Use `--input-file FILE` for long prompts. The file is read before dispatching to
 the background worker, so relative paths are resolved from the directory where
 you ran the command.
+
+Use `screenshot --output FILE` to save the current browser page viewport from the
+active session. Relative output paths are resolved from the directory where you
+ran the command.
 
 Use `--dry-run` to exercise the browser flow without submitting the prompt. It
 opens the composer/chat, selects model/tool options, uploads files, and selects

@@ -17,6 +17,7 @@ from geminiwebapp_cli.exceptions import (
     InteractiveAuthenticationRequired,
     MusicDownloadError,
     ResponseTimeoutError,
+    ScreenshotError,
     VideoDownloadError,
 )
 from geminiwebapp_cli.session import GeminiSession, clear_profile, session_lock
@@ -33,6 +34,7 @@ _ERROR_TYPES = [
     (ImageDownloadError, "image_download"),
     (VideoDownloadError, "video_download"),
     (MusicDownloadError, "music_download"),
+    (ScreenshotError, "screenshot"),
 ]
 
 
@@ -105,6 +107,8 @@ def _render(command: str, result: dict, as_json: bool) -> None:
     elif command == "chats-music":
         music = result.get("music") or []
         _out("(no music)" if not music else "\n".join(str(track.get("path") or "") for track in music))
+    elif command == "screenshot":
+        _out(str(result.get("path") or ""))
     elif command == "session-clear":
         _out(f"cleared {result.get('name')}")
     elif command == "session-stop":
@@ -223,6 +227,12 @@ def _verb_chats_music(session, args) -> dict:
     return save_chat_music(session, args.chat, output_dir=args.output_dir)
 
 
+def _verb_screenshot(session, args) -> dict:
+    from geminiwebapp_cli.actions.screenshot import take_screenshot
+
+    return take_screenshot(session, output=args.output)
+
+
 def _chat_timeout(args) -> int:
     if getattr(args, "timeout", None) == DEFAULT_RESPONSE_TIMEOUT_S and getattr(args, "wait_research_complete", False):
         return DEFAULT_DEEP_RESEARCH_TIMEOUT_S
@@ -264,6 +274,7 @@ _VERBS = {
     "chats-images": _verb_chats_images,
     "chats-videos": _verb_chats_videos,
     "chats-music": _verb_chats_music,
+    "screenshot": _verb_screenshot,
 }
 
 
@@ -342,7 +353,7 @@ def _prompt_text(args) -> str:
 
 
 def _argv_with_prompt_text(args, argv: list[str]) -> list[str]:
-    if not getattr(args, "input_file", None) and not getattr(args, "file", None) and not getattr(args, "output_dir", None) and _media_output_dir(args) is None:
+    if not getattr(args, "input_file", None) and not getattr(args, "file", None) and not getattr(args, "output_dir", None) and not getattr(args, "output", None) and _media_output_dir(args) is None:
         return argv
     rewritten = []
     skip_next = False
@@ -360,6 +371,7 @@ def _argv_with_prompt_text(args, argv: list[str]) -> list[str]:
         rewritten.extend(["--text", _prompt_text(args)])
     rewritten = _rewrite_file_args(args, rewritten)
     rewritten = _rewrite_output_dir_arg(args, rewritten)
+    rewritten = _rewrite_output_arg(args, rewritten)
     return rewritten
 
 
@@ -401,6 +413,26 @@ def _rewrite_output_dir_arg(args, argv: list[str]) -> list[str]:
             continue
         rewritten.append(item)
     rewritten.extend(["--output-dir", str(output_dir.expanduser().resolve())])
+    return rewritten
+
+
+def _rewrite_output_arg(args, argv: list[str]) -> list[str]:
+    output = getattr(args, "output", None)
+    if output is None:
+        return argv
+    rewritten = []
+    skip_next = False
+    for item in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if item == "--output":
+            skip_next = True
+            continue
+        if item.startswith("--output="):
+            continue
+        rewritten.append(item)
+    rewritten.extend(["--output", str(output.expanduser().resolve())])
     return rewritten
 
 
@@ -459,6 +491,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_login.add_argument("--interactive", action="store_true", help="Open Gemini and wait while you complete Google login manually")
     p_login.add_argument("--wait", action="store_true", help="With --interactive, poll until login completes instead of waiting for Enter")
     p_login.add_argument("--timeout", type=int, default=300, help="Maximum seconds to wait with --interactive --wait (default: 300)")
+
+    p_screenshot = sub.add_parser("screenshot", parents=[common], help="Save a screenshot of the current browser page")
+    p_screenshot.add_argument("--output", type=Path, default=Path("screenshot.png"), help="Screenshot file path (default: screenshot.png)")
 
     auth_cmd = sub.add_parser("auth", help="Authenticate the persistent browser profile")
     auth_sub = auth_cmd.add_subparsers(dest="auth_cmd", required=True)
