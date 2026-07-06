@@ -886,14 +886,18 @@ def _dismiss_open_overlay(page) -> None:
 
 def _download_full_size_image(page, *, image_index: int):
     buttons = page.get_by_label("Download full-sized image")
-    try:
-        button = buttons.nth(image_index)
-        button.scroll_into_view_if_needed(timeout=5000)
-        with page.expect_download(timeout=30000) as download_info:
-            button.click(timeout=5000)
-        return download_info.value
-    except PlaywrightError as exc:
-        raise ImageDownloadError(f"Could not download full-sized generated image {image_index + 1}: {exc}") from exc
+    errors = []
+    for _ in range(3):
+        try:
+            button = buttons.nth(image_index)
+            button.scroll_into_view_if_needed(timeout=5000)
+            page.wait_for_timeout(10000)
+            with page.expect_download(timeout=30000) as download_info:
+                button.click(timeout=5000)
+            return download_info.value
+        except PlaywrightError as exc:
+            errors.append(str(exc))
+    raise ImageDownloadError(f"Could not download full-sized generated image {image_index + 1}: {'; '.join(errors[-2:])}")
 
 
 def _download_extension(suggested_filename: str | None) -> str:
